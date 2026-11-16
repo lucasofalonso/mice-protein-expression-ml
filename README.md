@@ -94,10 +94,12 @@ uv sync
 uv run python train.py
 ```
 
-This downloads the data, repeats the animal-level split, trains the selected pipeline on the 57 full_train animals and prints the held-out test result. It saves to `models/`:
+This downloads the data, repeats the animal-level split, trains the selected pipeline on the 57 full_train animals and prints the held-out test result. It saves:
 
-- `model.joblib`: the full pipeline (imputer, scaler, logistic regression).
-- `protein_columns.json`: the 77 protein columns, in training order.
+- `models/model.joblib`: the full pipeline (imputer, scaler, logistic regression).
+- `models/protein_columns.json`: the 77 protein columns, in training order.
+- `examples/animal.csv`: the 225 measurements of the 15 test animals, without labels, as an example input.
+- `examples/animal_labeled.csv`: the same rows plus the optional `class` column, to compare predictions with the actual class.
 
 ### Predict (CLI)
 
@@ -105,17 +107,48 @@ This downloads the data, repeats the animal-level split, trains the selected pip
 uv run python predict.py --input examples/animal.csv
 ```
 
-The input CSV needs an `animal_id` column and the 77 protein columns, with 15 measurements (rows) per animal. Labels (`class`, `Genotype`, `Treatment`, `Behavior`) are not required, and extra columns are ignored. Missing columns and non-numeric values are rejected. Missing protein values are imputed by the pipeline. The CLI warns if an animal does not have 15 measurements.
+The input CSV needs an `animal_id` column and the 77 protein columns, with 15 measurements (rows) per animal. Labels (`class`, `Genotype`, `Treatment`, `Behavior`) are not required, and extra columns are ignored by the model. Missing columns and non-numeric values are rejected. Missing protein values are imputed by the pipeline. The CLI warns if an animal does not have 15 measurements.
 
-The output has one row per animal, with the predicted class and the averaged probability of each class:
+The output has one row per animal, with the predicted class and the averaged probability of each class. For the 15 test animals in `examples/animal.csv`:
 
 ```text
 animal_id  n_measurements predicted_class  prob_c-CS-m  prob_c-CS-s  prob_c-SC-m  prob_c-SC-s  prob_t-CS-m  prob_t-CS-s  prob_t-SC-m  prob_t-SC-s
       321              15          c-CS-m        0.801        0.070        0.000        0.085        0.006        0.022        0.014        0.002
+     3507              15          c-CS-m        0.901        0.011        0.006        0.014        0.056        0.003        0.003        0.006
      3412              15          c-SC-m        0.000        0.000        0.979        0.002        0.000        0.000        0.017        0.002
+     3420              15          c-SC-m        0.000        0.003        0.689        0.006        0.001        0.000        0.295        0.006
+     3484              15          t-CS-m        0.000        0.000        0.000        0.000        0.958        0.041        0.000        0.000
+   50810D              15          c-CS-s        0.233        0.727        0.001        0.001        0.021        0.005        0.000        0.013
+     3424              15          c-SC-s        0.036        0.002        0.026        0.655        0.004        0.007        0.262        0.008
+     3481              15          c-SC-s        0.007        0.001        0.042        0.872        0.002        0.000        0.073        0.003
+     3504              15          t-CS-m        0.092        0.002        0.001        0.000        0.864        0.039        0.000        0.002
+     3522              15          t-CS-m        0.088        0.200        0.001        0.001        0.535        0.089        0.000        0.087
+     3501              15          t-SC-m        0.001        0.000        0.001        0.027        0.000        0.000        0.948        0.023
+     3534              15          t-SC-m        0.001        0.000        0.113        0.006        0.004        0.000        0.871        0.005
+     3476              15          t-CS-m        0.012        0.325        0.002        0.000        0.421        0.056        0.001        0.182
+     3425              15          t-SC-s        0.038        0.017        0.023        0.020        0.008        0.027        0.003        0.863
+     3491              15          t-SC-s        0.025        0.032        0.061        0.008        0.037        0.003        0.059        0.776
 ```
 
-Add `--output predictions.csv` to save the result. `examples/animal.csv` contains the 30 measurements of two test animals, with the labels removed.
+If the CSV has a `class` column, the output adds `actual_class` and `correct` and ends with a summary. The label is never passed to the model:
+
+```bash
+uv run python predict.py --input examples/animal_labeled.csv
+```
+
+```text
+animal_id  n_measurements predicted_class actual_class  correct  prob_c-CS-m  ...
+      321              15          c-CS-m       c-CS-m     True        0.801  ...
+     3484              15          t-CS-m       c-CS-s    False        0.000  ...
+     3476              15          t-CS-m       t-CS-s    False        0.012  ...
+      ...
+
+Correct: 13 of 15 labeled animals (accuracy 0.867)
+```
+
+The two errors are confusions within the CS block: 3484 (c-CS-s) and 3476 (t-CS-s), both predicted as t-CS-m.
+
+Add `--output predictions.csv` to save the result.
 
 ### Web app (Streamlit)
 
@@ -123,7 +156,11 @@ Add `--output predictions.csv` to save the result. `examples/animal.csv` contain
 uv run streamlit run app.py
 ```
 
-Upload a CSV in the same format, or tick the box to use the example file. The app calls the same inference code as the CLI (`src/mice_protein_expression_ml/inference.py`).
+Upload a CSV in the same format, or tick the box to use the labeled example (`examples/animal_labeled.csv`). The app calls the same inference code as the CLI (`src/mice_protein_expression_ml/inference.py`). When the CSV has a `class` column, the app shows:
+
+- a summary: labeled animals, correct predictions and accuracy;
+- the accuracy per actual class;
+- the predictions table, with each animal marked ✓ correct or ✗ wrong.
 
 ### Docker
 
@@ -146,8 +183,8 @@ src/mice_protein_expression_ml/
   data.py                     # data download and animal-level train/test split
   inference.py                # input validation and per-animal prediction (CLI and app)
 models/                       # trained pipeline and protein column order
-examples/animal.csv           # example input without labels
-train.py                      # trains and saves the selected model
+examples/                     # test animals without / with labels (written by train.py)
+train.py                      # trains and saves the selected model and the example input
 predict.py                    # command-line predictions
 app.py                        # Streamlit app
 Dockerfile

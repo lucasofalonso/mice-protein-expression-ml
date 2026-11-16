@@ -4,7 +4,8 @@ Usage:
     uv run python predict.py --input examples/animal.csv [--output predictions.csv]
 
 The CSV needs an animal_id column and the 77 protein columns (15 measurements per
-animal). Labels (class, Genotype, Treatment, Behavior) are not required.
+animal). Labels (class, Genotype, Treatment, Behavior) are not required; if a class
+column is present, the output also compares the predictions with it.
 """
 
 import argparse
@@ -17,6 +18,7 @@ from mice_protein_expression_ml.inference import (
     EXPECTED_MEASUREMENTS,
     MODELS_DIR,
     animals_with_unexpected_count,
+    evaluation_summary,
     load_model,
     predict_animals,
 )
@@ -44,6 +46,13 @@ def main() -> None:
         )
 
     print(predictions.to_string(index=False, float_format=lambda value: f"{value:.3f}"))
+
+    summary = evaluation_summary(predictions)
+    if summary:
+        print(
+            f"\nCorrect: {summary['correct']} of {summary['animals']} labeled animals "
+            f"(accuracy {summary['accuracy']:.3f})"
+        )
 
     if args.output:
         predictions.to_csv(args.output, index=False)

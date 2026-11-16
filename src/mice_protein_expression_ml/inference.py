@@ -10,6 +10,7 @@ MODELS_DIR = Path(__file__).resolve().parents[2] / "models"
 MODEL_FILE = "model.joblib"
 PROTEINS_FILE = "protein_columns.json"
 EXPECTED_MEASUREMENTS = 15
+LABEL_COL = "class"
 
 
 def load_model(models_dir: Path = MODELS_DIR):
@@ -46,6 +47,8 @@ def predict_animals(model, protein_cols: list[str], df: pd.DataFrame) -> pd.Data
     """Predict every measurement, average the probabilities per animal and return one row per animal.
 
     Missing protein values are imputed by the pipeline (median from training).
+    If the input has an optional `class` column, the result also gets `actual_class`
+    and `correct`; the label is never passed to the model.
     """
     data = validate_input(df, protein_cols)
     proba = pd.DataFrame(
@@ -56,8 +59,47 @@ def predict_animals(model, protein_cols: list[str], df: pd.DataFrame) -> pd.Data
     result = pd.DataFrame({
         "n_measurements": data.groupby("animal_id", sort=False).size(),
         "predicted_class": by_animal.idxmax(axis=1),
-    }).join(by_animal.add_prefix("prob_"))
+    })
+    if LABEL_COL in df.columns:
+        result["actual_class"] = actual_class_per_animal(df).reindex(result.index)
+        result["correct"] = (result["predicted_class"] == result["actual_class"]).where(
+            result["actual_class"].notna()
+        )
+    result = result.join(by_animal.add_prefix("prob_"))
     return result.rename_axis("animal_id").reset_index()
+
+
+def actual_class_per_animal(df: pd.DataFrame) -> pd.Series:
+    """The optional label of each animal; an animal cannot have more than one class."""
+    labels = df[[LABEL_COL]].assign(animal_id=df["animal_id"].astype(str)).dropna()
+    n_classes = labels.groupby("animal_id")[LABEL_COL].nunique()
+    if (n_classes > 1).any():
+        raise ValueError(f"Animals with more than one class: {', '.join(n_classes[n_classes > 1].index)}")
+    return labels.groupby("animal_id")[LABEL_COL].first()
+
+
+def evaluation_summary(predictions: pd.DataFrame) -> dict | None:
+    """Correct predictions over the animals with a class label; None if there are no labels."""
+    if "actual_class" not in predictions.columns:
+        return None
+    labeled = predictions.dropna(subset=["actual_class"])
+    if labeled.empty:
+        return None
+    correct = labeled["correct"].astype(bool)
+    per_class = (
+        labeled.assign(correct=correct)
+        .groupby("actual_class")["correct"]
+        .agg(animals="size", correct="sum")
+        .assign(accuracy=lambda t: t["correct"] / t["animals"])
+        .rename_axis("class")
+        .reset_index()
+    )
+    return {
+        "animals": len(labeled),
+        "correct": int(correct.sum()),
+        "accuracy": correct.mean(),
+        "per_class": per_class,
+    }
 
 
 def animals_with_unexpected_count(predictions: pd.DataFrame) -> list[str]:
